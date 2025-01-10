@@ -1,0 +1,295 @@
+library(shiny)
+library(DBI)
+library(RMySQL)
+library(ggplot2)
+library(plotly)
+library(dplyr)
+library(tidyr)
+library(umap)
+library(heatmaply)
+library(RColorBrewer)
+library(reshape2)
+library(shinycssloaders)
+
+# Define UI
+gene_clustering_ui <- fluidPage(
+  titlePanel(
+    HTML("<span style='font-family: Arial; font-size: 20px; 
+         font-weight: italic;'>Clustering of Gene Symbols on Significance Score</span>")
+  ),
+  
+  sidebarLayout(
+    sidebarPanel(
+      selectInput("plot_type", "Choose Clustering Type:", 
+                  choices = c("--" = "--", "UMAP" = "umap", "Heatmap/Dendrogram" = "heatmap"),
+                  selected = "--" ),
+      width = 3
+    ),
+    
+    mainPanel(
+      conditionalPanel(
+        condition = "input.plot_type == 'umap'",
+        withSpinner(plotlyOutput("cluster_plot", height = "600px")),
+        verbatimTextOutput("click_info")
+      ),
+      conditionalPanel(
+        condition = "input.plot_type == 'heatmap'",
+        withSpinner(plotlyOutput("heatmap_plot", height = "600px")),
+        verbatimTextOutput("click_info")
+      ),
+      width = 9
+    )
+  )
+)
+
+# Define Server
+gene_clustering_server <- function(input, output, session) {
+  # Establish a database connection
+  con <- dbConnect(
+    RMySQL::MySQL(),
+    dbname = "dcdm_project",
+    host = "localhost",
+    user = "barry",
+    password = "push12@KCL"
+  )
+  
+  onStop(function() {
+    dbDisconnect(con)  # Ensure connection is closed
+  })
+  
+  # Reactive data filtered from the database
+  filtered_data <- reactive({
+    query <- "SELECT UPPER(gene_symbol) as gene_symbol,
+              CONCAT(UCASE(SUBSTRING(parameter_name, 1, 1)), 
+              LOWER(SUBSTRING(parameter_name, 2))) AS parameter_name, 
+              pvalue,
+              CONCAT(UCASE(SUBSTRING(group_name, 1, 1)), 
+              LOWER(SUBSTRING(group_name, 2))) AS group_name 
+              FROM analysis"
+    dbGetQuery(con, query)
+  })
+  
+  # UMAP Data
+  umap_data <- reactive({
+    req(input$plot_type == "umap")  # Only process if UMAP is selected
+    
+    data <- filtered_data()
+    validate(
+      need(!is.null(data) && nrow(data) > 0, "No data available for UMAP clustering.")
+    )
+    
+    data <- data %>%
+      filter(!is.na(pvalue), pvalue < 0.0001) %>%
+      group_by(group_name) %>%
+      mutate(group_id = as.integer(factor(group_name))) %>%
+      ungroup()
+    
+    umap_input <- scale(data$pvalue)
+    umap_result <- umap(umap_input, n_neighbors = 15, min_dist = 0.1, metric = "euclidean")
+    
+    data <- data %>%
+      mutate(
+        umap_x = umap_result$layout[, 1],
+        umap_y = umap_result$layout[, 2]
+      )
+    return(data)
+  })
+  
+  # Heatmap Data
+  heatmap_data <- reactive({
+    req(input$plot_type == "heatmap")  # Only process if Heatmap is selected
+    
+    data <- filtered_data()
+    validate(
+      need(!is.null(data) && nrow(data) > 0, "No data available for heatmap.")
+    )
+    
+    data <- data %>%
+      filter(!is.na(pvalue), pvalue < 0.0001)
+    
+    # Reshape into a matrix for clustering
+    heatmap_matrix <- dcast(data, formula = gene_symbol ~ group_name, value.var = "pvalue", fill = 0)
+    
+    # Set row names and convert to matrix
+    rownames(heatmap_matrix) <- heatmap_matrix[[1]]
+    heatmap_matrix <- heatmap_matrix[, -1]
+    heatmap_matrix <- as.matrix(heatmap_matrix)
+    
+    # Remove genes (rows) with zero variance (constant values)
+    heatmap_matrix <- heatmap_matrix[apply(heatmap_matrix, 1, var) > 0, ]
+    
+    # Optional: Standardize data for better clustering
+    heatmap_matrix <- scale(heatmap_matrix)
+  
+    print(nrow(heatmap_matrix))
+    # Perform hierarchical clustering
+    row_dendrogram <- hclust(dist(heatmap_matrix, method = "euclidean"), method = "complete")
+    col_dendrogram <- hclust(dist(t(heatmap_matrix), method = "euclidean"), method = "complete")
+    
+    # Return the heatmap data and dendrogram information
+    list(
+      heatmap_matrix = heatmap_matrix,
+      row_dendrogram = row_dendrogram,
+      col_dendrogram = col_dendrogram
+    )
+  })
+  
+  
+  # Render UMAP Plot
+  output$cluster_plot <- renderPlotly({
+    req(input$plot_type == "umap")
+    
+    data <- umap_data()
+    if (is.null(data) || nrow(data) == 0) {
+      showNotification("No data available for clustering!", type = "error")
+      return(NULL)
+    }
+    
+    # Visualize significant genes with UMAP
+    plot <- ggplot(data, aes(
+      x = umap_x, y = umap_y, color = group_name, text = paste(
+        "Gene Symbol:", gene_symbol,
+        "<br>Group:", group_name,
+        "<br>P-Value:", sprintf("%.5f", pvalue)
+      )
+    )) +
+      geom_point(size = 2, alpha = 0.8) +
+      scale_color_manual(values = scales::hue_pal()(length(unique(data$group_name)))) +
+      labs(
+        title = "",
+        x = "",
+        y = "",
+        color = "   Groups"
+      ) +
+      theme_minimal() +
+      theme(
+        plot.title = element_text(hjust = 0.5, size = 16),
+        legend.position = "right"
+      )
+    
+    ggplotly(plot, tooltip = "text")
+  })
+  
+  # Render Heatmap
+  output$heatmap_plot <- renderPlotly({
+    req(input$plot_type == "heatmap")
+    
+    heatmap_info <- heatmap_data()
+    heatmap_matrix <- heatmap_info$heatmap_matrix
+    validate(
+      need(!is.null(heatmap_matrix), "No data available for the heatmap.")
+    )
+    
+    # Create custom hover text
+    row_names <- rownames(heatmap_matrix)
+    col_names <- colnames(heatmap_matrix)
+    
+    # Generate hover text for each cell
+    hover_text <- matrix(
+      paste(
+        "Gene: ", rep(row_names, ncol(heatmap_matrix)),
+        "<br>Group: ", rep(col_names, each = nrow(heatmap_matrix)),
+        "<br>Value: ", round(as.vector(heatmap_matrix), 4)
+      ),
+      nrow = nrow(heatmap_matrix),
+      ncol = ncol(heatmap_matrix)
+    )
+    
+    colors <- colorRampPalette(rev(brewer.pal(9, "RdBu")))(200)
+    
+    # Render heatmap with hover text
+    p <- heatmaply(
+      heatmap_matrix,
+      dendrogram = "both",         # Cluster rows and columns
+      xlab = "",
+      ylab = "",
+      colors = colors,
+      plot_method = "plotly",      # Interactive Plotly heatmap
+      custom_hovertext = hover_text,
+      #height = 1500
+    )
+    
+    # Click event: capture the clicked point
+    p <- p %>% layout(
+      clickmode = "event+select"
+    ) %>% event_register("plotly_click")
+    
+    return(p)
+  })
+  
+  output$click_info <- renderText({
+    # Capture the click event
+    click <- event_data("plotly_click")
+    
+    if (is.null(click)) {
+      return("Click on a point to see details.")
+    }
+    
+    # Check which plot is selected (UMAP or Heatmap)
+    if (input$plot_type == "umap") {
+      # Use the UMAP data reactive expression
+      data <- umap_data()
+      
+      if (is.null(data)) {
+        return("No data available.")
+      }
+      
+      # Match the closest point based on the clicked coordinates
+      clicked_point <- data %>%
+        mutate(
+          distance = sqrt((umap_x - click$x)^2 + (umap_y - click$y)^2)
+        ) %>%
+        filter(distance == min(distance))
+      
+      if (nrow(clicked_point) > 0) {
+        paste(
+          "Gene Symbol: ", clicked_point$gene_symbol[1],
+          "\nPhenotype: ", clicked_point$parameter_name[1],
+          "\nGroup Name: ", clicked_point$group_name[1],
+          "\nP-Value: ", sprintf("%.7f", clicked_point$pvalue[1])
+        )
+      } else {
+        "Click on a point to see details."
+      }
+      
+    } else if (input$plot_type == "heatmap") {
+      # Get heatmap data
+      heatmap_info <- heatmap_data()
+      heatmap_matrix <- heatmap_info$heatmap_matrix
+      row_dendrogram <- heatmap_info$row_dendrogram
+      col_dendrogram <- heatmap_info$col_dendrogram
+      
+      # Get clicked point coordinates (row and column indices)
+      clicked_row <- round(click$y)
+      clicked_col <- round(click$x)
+      
+      # Ensure indices are within bounds
+      if (clicked_row < 1 || clicked_row > nrow(heatmap_matrix) || 
+          clicked_col < 1 || clicked_col > ncol(heatmap_matrix)) {
+        return("Click is out of bounds.")
+      }
+      
+      # Retrieve the gene name and group name from the clicked coordinates
+      clicked_gene <- rownames(heatmap_matrix)[clicked_row]
+      clicked_group <- colnames(heatmap_matrix)[clicked_col]
+      
+      # Find cluster assignments for the clicked row and column
+      row_cluster <- cutree(row_dendrogram, k = 3)  # Adjust number of clusters (k) if needed
+      col_cluster <- cutree(col_dendrogram, k = 3)  # Adjust number of clusters (k) if needed
+      
+      # Get the cluster assignments for the clicked row and column
+      clicked_row_cluster <- row_cluster[clicked_row]
+      clicked_col_cluster <- col_cluster[clicked_col]
+      
+      # Construct the output text with details of the clicked point
+      paste(
+        "Gene: ", clicked_gene,
+        "\nGroup: ", clicked_group,
+        "\nRow Cluster: ", clicked_row_cluster,
+        "\nColumn Cluster: ", clicked_col_cluster
+      )
+    } else {
+      "Click on a point to see details."
+    }
+  })
+}

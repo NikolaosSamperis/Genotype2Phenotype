@@ -1,0 +1,26 @@
+{
+    "id": "ADA9EAEA",
+    "path": "~/School/7BBG1003/Project/App_V6/dashboard/phenotype_significance.R",
+    "project_path": "phenotype_significance.R",
+    "type": "r_source",
+    "hash": "0",
+    "contents": "",
+    "dirty": false,
+    "created": 1735233147078.0,
+    "source_on_save": false,
+    "relative_order": 3,
+    "properties": {
+        "source_window_id": "",
+        "Source": "Source",
+        "cursorPosition": "196,62",
+        "scrollLine": "160"
+    },
+    "folds": "",
+    "lastKnownWriteTime": 1736418107,
+    "encoding": "UTF-8",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1736418107953,
+    "read_only": false,
+    "read_only_alternatives": []
+}

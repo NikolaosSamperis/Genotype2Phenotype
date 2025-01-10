@@ -1,0 +1,566 @@
+---
+title: "DBMS"
+author: "Bhargav Pulugundla"
+date: "2024-12-26"
+output: pdf_document
+---
+
+Configures global options for code chunks. Here, echo = FALSE ensures that the R code itself is hidden in the final document output.
+```{r}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+Load Dependencies
+```{r}
+# Install dependencies
+# install.packages(c("DBI", "RMySQL", "readr", "readxl", "dplyr", "ggplot2", 
+#                                          "stringr")
+
+library(DBI)         # Enabling database connectivity in R
+library(RMySQL)      # A backend driver for DBI to interact with MySQL
+library(readr)       # Facilitates reading and writing data efficiently
+library(readxl)      # Enables reading Excel files
+library(dplyr)       # Data manipulation
+library(tidyr)       # Data Tidying
+library(ggplot2)     # Graphics for plots
+library(stringr)     # String operations
+```
+
+Establishes a temporary connection to MySQL, creates a database, and ensures the previous one is dropped if it exists. Reconnects with the new database for subsequent operations.
+```{r, echo=FALSE}
+# Create a temporary connection to the MySQL server
+temp_con <- dbConnect(
+  RMySQL::MySQL(),
+  host = "localhost",
+  user = "barry",
+  password = "push12@KCL"
+)
+
+# Drop database if exists and create a new one
+dbExecute(temp_con, "DROP DATABASE IF EXISTS dcdm_project_final")
+dbExecute(temp_con, "CREATE DATABASE dcdm_project_final")
+
+# Disconnect from the temporary connection
+dbDisconnect(temp_con)
+
+con <- dbConnect(
+  RMySQL::MySQL(),
+  dbname = "dcdm_project_final",
+  host = "localhost",
+  user = "barry",
+  password = "push12@KCL"
+)
+```
+
+Reads the impc_data.csv file into a dataframe and  cleans invalid pvalue entries, replacing values greater than 1 with NA.
+```{r}
+# Load cleaned analysis data into a dataframe
+data_cleaned <- read.csv("../Data/impc_data.csv", stringsAsFactors = FALSE) 
+data_cleaned$pvalue[data_cleaned$pvalue > 1.0] <- NA
+```
+
+Reads chromosome data from an Excel file, renames columns, converts gene symbols to lowercase, and merges this data with data_cleaned based on gene_accession_id.
+```{r}
+chr_data <- read_excel("../Data/MGI_chromosome_data.xlsx")
+
+chromosome_gene <- chr_data %>%
+  dplyr::select(Input, Symbol, Chr) %>%
+  mutate(Symbol = tolower(Symbol)) 
+
+chromosome_gene = rename(chromosome_gene, chromosome = Chr, gene_accession_id = Input, gene_symbol = Symbol)
+```
+
+
+Adds a new table parameter_groups by grouping parameter_name from data_cleaned into categories like brain, weight, etc., based on predefined criteria.
+```{r}
+parameter_groups <- data_cleaned %>%
+  mutate(
+    # Convert parameter_name to lowercase
+    parameter_name = tolower(parameter_name),
+    
+    group_name = case_when(
+      # Brain
+      parameter_name %in% c(
+        "activity (body position)",
+        "locomotor activity",
+        "startle response",
+        "% pre-pulse inhibition - global",
+        "% pre-pulse inhibition - ppi2",
+        "% pre-pulse inhibition - ppi3",
+        "% pre-pulse inhibition - ppi4",
+        "response amplitude - s",
+        "latency to first transition into dark",
+        "cue baseline % freezing time",
+        "difference in conditioning post-shock and conditioning baseline % freezing",
+        "hindbrain morphology",
+        "neural tube closure",
+        "neural tube morphology",
+        "responsive to tactile stimuli",
+        "tremor",
+        "gait",
+        "vocalization"
+      ) ~ "brain",
+      
+      # Weight
+      parameter_name %in% c(
+        "body weight",
+        "fat/body weight",
+        "lean/body weight",
+        "lean mass",
+        "fat mass",
+        "bone mineral density (excluding skull)",
+        "bone mineral content (excluding skull)",
+        "bmc/body weight",
+        "bone area",
+        "body length",
+        "spleen weight",
+        "heart weight"
+      ) ~ "weight",
+      
+      # Image
+      parameter_name %in% c(
+        "number of caudal vertebrae",
+        "fusion of vertebrae",
+        "tibia length",
+        "craniofacial morphology",
+        "microphthalmia",
+        "placenta morphology",
+        "embryo size",
+        "tail bud morphology",
+        "visceral yolk sac morphology",
+        "vitelline vasculature morphology",
+        "embryo turning",
+        "edema",
+        "pallor"
+      ) ~ "image",
+      
+      # Biochemical and metabolic markers
+      parameter_name %in% c(
+        "potassium",
+        "phosphorus",
+        "hdl-cholesterol",
+        "total cholesterol",
+        "cholesterol ratio",
+        "triglycerides",
+        "glucose",
+        "urea (blood urea nitrogen - bun)",
+        "creatinine",
+        "total bilirubin",
+        "alanine aminotransferase",
+        "aspartate aminotransferase",
+        "alkaline phosphatase",
+        "fructosamine",
+        "thyroxine",
+        "calcium",
+        "albumin",
+        "total protein",
+        "chloride",
+        "iron",
+        "insulin"
+      ) ~ "metabolic",
+      
+      # Hematopoietic
+      parameter_name %in% c(
+        "hemoglobin",
+        "hematocrit",
+        "red blood cell count",
+        "red blood cell distribution width",
+        "white blood cell count",
+        "platelet count",
+        "mean platelet volume",
+        "mean cell volume",
+        "mean corpuscular hemoglobin",
+        "mean cell hemoglobin concentration",
+        "eosinophil cell count",
+        "eosinophil differential count",
+        "basophil cell count",
+        "basophil differential count",
+        "neutrophil cell count",
+        "neutrophil differential count",
+        "lymphocyte cell count",
+        "lymphocyte differential count",
+        "monocyte cell count",
+        "monocyte differential count",
+        "large unstained cell (luc) count"
+      ) ~ "hematopoietic",
+      
+      # Strength
+      parameter_name %in% c(
+        "forelimb grip strength measurement mean",
+        "forelimb and hindlimb grip strength measurement mean",
+        "forelimb grip strength normalised against body weight",
+        "forelimb and hindlimb grip strength normalised against body weight",
+        "contact righting",
+        "activity (body position)",
+        "gait"
+      ) ~ "strength",
+      
+      # Cardiovascular
+      parameter_name %in% c(
+        "aortic diameter (dao)",
+        "end-systolic diameter",
+        "fractional shortening",
+        "hr",
+        "pr",
+        "qrs",
+        "rr"
+      ) ~ "cardiovascular",
+      
+      # Locomotion
+      parameter_name %in% c(
+        "center distance travelled",
+        "distance travelled - total",
+        "percentage center time",
+        "percentage center movement time",
+        "whole arena average speed",
+        "center average speed",
+        "periphery average speed",
+        "periphery distance travelled",
+        "periphery permanence time",
+        "periphery resting time",
+        "center permanence time",
+        "center resting time",
+        "number of center entries",
+        "number of rears - total"
+      ) ~ "locomotion",
+      
+      # Morphology
+      parameter_name %in% c(
+        "craniofacial morphology",
+        "microphthalmia",
+        "number of caudal vertebrae",
+        "fusion of vertebrae",
+        "tibia length",
+        "tail bud morphology",
+        "shape of vertebrae",
+        "embryo size",
+        "embryo turning",
+        "neural tube closure",
+        "neural tube morphology",
+        "hindbrain morphology",
+        "edema",
+        "pallor",
+        "responsive to tactile stimuli",
+        "delayed embryonic development",
+        "placenta morphology",
+        "visceral yolk sac morphology",
+        "placenta vasculature",
+        "vitelline vasculature morphology",
+        "persistence of hyaloid vascular system",
+        "microphthalmia",
+        "lens opacity",
+        "corneal ulcer",
+        "corneal vascularization",
+        "corneal opacity",
+        "narrow eye opening",
+        "retinal blood vessels pattern",
+        "retinal blood vessels structure",
+        "optic disc",
+        "right total retinal thickness",
+        "left total retinal thickness",
+        "vitreous",
+        "retina (combined)",
+        "retinal blood vessels",
+        "left anterior chamber depth",
+        "left inner nuclear layer",
+        "left outer nuclear layer",
+        "right anterior chamber depth",
+        "right corneal thickness",
+        "blood vessel morphology",
+        "mouth morphology",
+        "heart morphology",
+        "skin color – tail"
+      ) ~ "morphology",
+      
+      # Default fallback for unmatched cases
+      TRUE ~ "others"
+    )
+  ) %>%
+  select(parameter_name, group_name) %>% # Keep only the relevant columns
+  distinct()
+```
+
+Joins cleaned data with grouped parameter categories to enhance the dataset with additional metadata.
+```{r}
+analysis <- data_cleaned %>%
+  mutate(parameter_name = tolower(parameter_name)) %>%
+  left_join(parameter_groups, by = "parameter_name") 
+```
+
+
+Sources helper functions for cleaning and loads procedure, parameter, and disease data from CSV files.
+```{r}
+# Source the file containing the function
+source("auxillary_cleaning.R")
+# Load procedures
+procedures <- process_procedures_csv("../Data/IMPC_procedure.csv")
+
+# Load procedure parameters 
+parameter_description <- process_parameters_csv("../Data/IMPC_parameter_description.csv")
+
+# Load disease information
+diseases <- process_diseases_csv("../Data/Disease_information.csv")
+```
+
+Standardizes the text in procedure descriptions by replacing HTML entities, adding spaces after periods, and formatting text. Also, rename fields for better readability.
+```{r}
+# Replace "&nbsp;" with a space, "&rsquo;" with the right single quotation mark and "&amp;" with an ampersand symbol (&) 
+procedures$description = procedures$description %>%
+  gsub("&nbsp;", " ", .) %>%
+  gsub("&rsquo;", "’", .) %>%
+  gsub("&amp;", "&", .)
+
+# Fix missing spaces after periods and replace multiple spaces with a single space 
+procedures$description = procedures$description %>%
+  gsub("\\.(?=[^\\s])", ". ", ., perl = TRUE) %>% # Ensure spaces after periods
+  gsub(" {2,}", " ", .) # Replace multiple spaces with a single space
+
+# Add periods before words starting with a capital letter after a lowercase letter or closing parenthesis
+procedures$description <- gsub("([a-z\\)])([A-Z])", "\\1. \\2", procedures$description)
+
+procedures <- procedures %>%
+  rename(
+    procedure_name = name,
+    procedure_description = description
+  ) %>%
+  mutate(
+    impcParameterOrigId = as.integer(impcParameterOrigId)
+  )
+
+parameter_description <- parameter_description %>%
+  rename(parameter_description = description) %>%
+  mutate(
+    impcParameterOrigId = as.integer(impcParameterOrigId)
+  )
+```
+
+
+Merges procedure and parameter descriptions with analysis data, ensuring unique entries and handling missing values. Also removes duplicates.
+```{r}
+merged_parameter_description <- parameter_description %>%
+  left_join(procedures %>% select(impcParameterOrigId, procedure_name, procedure_description), 
+            by = "impcParameterOrigId") %>% distinct()
+
+merged_analysis <- analysis %>%
+  left_join(merged_parameter_description %>% 
+            select(parameter_id, parameter_description, procedure_name, procedure_description), 
+            by = "parameter_id") %>%
+  distinct() %>%  # Remove duplicate rows
+  mutate(parameter_description = ifelse(parameter_description == "NA", NA, parameter_description))  %>%
+  group_by(analysis_id) %>%  # Group by analysis_id
+  slice(1) %>%  # Keep only the first row for each analysis_id
+  ungroup()
+```
+Creates tables in the database for various data categories (parameter_groups, chromosome_gene, etc.) and populates them with processed data.
+```{r}
+dbSendQuery(con, "
+CREATE TABLE parameter_groups (
+    parameter_name VARCHAR(74),
+    group_name VARCHAR(30),             
+    PRIMARY KEY (parameter_name)
+);")
+
+
+dbWriteTable(
+  con, 
+  name = "parameter_groups",  
+  value = parameter_groups,    
+  append = TRUE,             
+  row.names = FALSE          
+)
+```
+
+```{r}
+dbSendQuery(con, "
+CREATE TABLE chromosome_gene (
+    gene_accession_id VARCHAR(11), 
+    gene_symbol VARCHAR(13),      
+    chromosome INT(1),               
+    PRIMARY KEY (gene_symbol, gene_accession_id)     
+);")
+
+
+dbWriteTable(
+  con, 
+  name = "chromosome_gene",  
+  value = chromosome_gene,    
+  append = TRUE,             
+  row.names = FALSE          
+)
+```
+
+ Creates a mapping between parameter IDs and original IDs, enabling a structured way to handle grouped parameters.
+```{r}
+# Create a map between parameter_id and impcParameterOrigId
+parameter_id_map <- parameter_description %>%
+  group_by(parameter_id) %>%
+  summarise(
+    impcParameterOrigIds = toString(unique(impcParameterOrigId)),
+    .groups = "drop"
+  ) %>%
+  mutate(impcParameterOrigIds_groupId = row_number()) # Add group_id
+
+# Add impcParameterOrigIds_groupId to parameter_description
+parameter_description_grouped <- parameter_description %>%
+  left_join(parameter_id_map %>% select(parameter_id, impcParameterOrigIds_groupId), 
+            by = "parameter_id") %>% # Join the group ID
+  select(-impcParameterOrigId) %>%  # Remove impcParameterOrigId
+  distinct(parameter_id, .keep_all = TRUE) # Keep unique rows by parameter_id
+```
+
+
+```{r}
+# Expand parameter_map to match by impcParameterOrigId
+impcParameterOrigIds_map_expanded <- parameter_id_map %>%
+  separate_rows(impcParameterOrigIds, sep = ", ") %>%
+  mutate(impcParameterOrigId = as.integer(impcParameterOrigIds)) %>% 
+  select(-impcParameterOrigIds, -parameter_id)
+
+# Join with procedures to map group IDs
+procedures_grouped <- procedures %>%
+  left_join(impcParameterOrigIds_map_expanded, by = c("impcParameterOrigId")) %>%
+  select(-impcParameterOrigId) %>%  
+  distinct(impcParameterOrigIds_groupId, .keep_all = TRUE) 
+```
+
+
+
+```{r}
+dbSendQuery(con, "
+CREATE TABLE parameter_id_map (
+    parameter_id VARCHAR(18),
+    impcParameterOrigIds VARCHAR(100),
+    impcParameterOrigIds_groupId INT(5),
+    PRIMARY KEY (impcParameterOrigIds_groupId)
+);")
+
+
+dbWriteTable(
+  con, 
+  name = "parameter_id_map",  
+  value = parameter_id_map,    
+  append = TRUE,             
+  row.names = FALSE          
+)
+```
+
+```{r}
+dbSendQuery(con, "
+CREATE TABLE impcParameterOrigIds_map_expanded (
+    impcParameterOrigId INT(6),
+    impcParameterOrigIds_groupId INT(5),
+    PRIMARY KEY (impcParameterOrigIds_groupId),
+    FOREIGN KEY (impcParameterOrigIds_groupId) 
+                REFERENCES parameter_id_map(impcParameterOrigIds_groupId)
+);")
+
+
+dbWriteTable(
+  con, 
+  name = "impcParameterOrigIds_map_expanded",  
+  value = impcParameterOrigIds_map_expanded,    
+  append = TRUE,             
+  row.names = FALSE          
+)
+```
+
+```{r}
+dbSendQuery(con, "
+CREATE TABLE procedures_grouped (
+    procedure_name VARCHAR(255),
+    procedure_description VARCHAR(255),
+    isMandatory BOOLEAN,
+    impcParameterOrigIds_groupId INT(5),
+    PRIMARY KEY (impcParameterOrigIds_groupId),
+    FOREIGN KEY (impcParameterOrigIds_groupId) 
+                REFERENCES impcParameterOrigIds_map_expanded(impcParameterOrigIds_groupId)
+);")
+
+
+dbWriteTable(
+  con, 
+  name = "procedures_grouped",      
+  value = procedures_grouped,         
+  append = TRUE,            
+  row.names = FALSE      
+)
+```
+
+
+```{r}
+dbSendQuery(con, "
+CREATE TABLE parameter_description_grouped ( 
+    impcParameterOrigIds_groupId INT(5),
+    name VARCHAR(255),
+    parameter_description VARCHAR(255),
+    parameter_id VARCHAR(18),
+    PRIMARY KEY (parameter_id),
+    FOREIGN KEY (impcParameterOrigIds_groupId) 
+                REFERENCES procedures_grouped(impcParameterOrigIds_groupId)
+);")
+
+
+dbWriteTable(
+  con, 
+  name = "parameter_description_grouped",        
+  value = parameter_description_grouped,       
+  append = TRUE,            
+  row.names = FALSE        
+)
+```
+
+```{r}
+dbSendQuery(con, "
+CREATE TABLE diseases (
+    disease_id VARCHAR(12),
+    disease_term VARCHAR(255),
+    gene_accession_id VARCHAR(11),
+    phenodigm_score FLOAT,
+    PRIMARY KEY (gene_accession_id)
+);")
+
+
+dbWriteTable(
+  con, 
+  name = "diseases",        
+  value = diseases,        
+  append = TRUE,            
+  row.names = FALSE        
+)
+```
+
+
+Defines and populates the analysis table with merged data, incorporating relationships with other tables for comprehensive storage.
+```{r, echo=FALSE}
+# Delete table if exists
+dbSendQuery(con, "DROP TABLE IF EXISTS analysis;")
+
+dbSendQuery(con, "
+CREATE TABLE analysis (
+    analysis_id VARCHAR(15),
+    gene_symbol VARCHAR(13),
+    mouse_strain VARCHAR(5),
+    gene_accession_id VARCHAR(11),
+    parameter_id VARCHAR(18),
+    mouse_life_stage VARCHAR(17),
+    pvalue FLOAT,
+    parameter_name VARCHAR(74),
+    PRIMARY KEY (analysis_id),
+    FOREIGN KEY (parameter_id) 
+                REFERENCES parameter_description_grouped(parameter_id),
+    FOREIGN KEY (parameter_name) REFERENCES parameter_groups(parameter_name),
+    FOREIGN KEY (gene_symbol, gene_accession_id) 
+                REFERENCES chromosome_gene(gene_symbol, gene_accession_id)
+);")
+
+
+
+dbWriteTable(
+  con, 
+  name = "analysis",          
+  value = data_cleaned,    
+  append = TRUE,            
+  row.names = FALSE          
+)
+```
+

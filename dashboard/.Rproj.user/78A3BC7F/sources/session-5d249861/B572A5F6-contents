@@ -1,0 +1,82 @@
+library(shiny)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(pheatmap)
+library(RColorBrewer)  # Import color palettes
+
+# Load and preprocess the data
+data = read.csv("clean_final_data.csv")
+
+# Convert p-value to log scale and remove NAs
+data = data %>%
+  mutate(log_p_value = -log10(pvalue)) %>%
+  filter(!is.na(log_p_value))
+
+# Set gene_symbol as row names (important for clustering)
+if (!"gene_symbol" %in% colnames(data)) {
+  stop("Error: The dataset must have a 'gene_symbol' column.")
+}
+
+clustering_data = data %>%
+  select(gene_symbol, log_p_value) %>%
+  column_to_rownames(var = "gene_symbol")
+
+# Ensure the dataset is valid for clustering
+if (nrow(clustering_data) < 2 || ncol(clustering_data) < 1) {
+  stop("Error: The dataset must have at least 2 genes and 1 numeric column for clustering.")
+}
+
+# Define UI
+ui = fluidPage(
+  titlePanel("Hierarchical Clustering Heatmap of Genes"),
+  sidebarLayout(
+    sidebarPanel(
+      sliderInput("clusters", "Number of Clusters:", min = 2, max = 10, value = 3)
+    ),
+    mainPanel(
+      plotOutput("heatmap")
+    )
+  )
+)
+
+# Define server
+server = function(input, output) {
+  reactive_heatmap = reactive({
+    # Perform hierarchical clustering
+    distance_matrix = dist(clustering_data, method = "euclidean")
+    hc = hclust(distance_matrix, method = "complete")
+    
+    # Cut tree into k clusters based on user input
+    kmeans_result = cutree(hc, k = input$clusters)
+    
+    # Generate dynamic color mapping for clusters
+    cluster_colors = brewer.pal(min(10, input$clusters), "Set3")  # Get distinct colors
+    names(cluster_colors) = as.character(1:input$clusters)  # Assign names to clusters
+    
+    # Create annotation colors
+    annotation_colors = list(Cluster = cluster_colors)
+    
+    # Plot heatmap
+    pheatmap(
+      clustering_data,
+      scale = "row",
+      clustering_distance_rows = "euclidean",
+      clustering_method = "complete",
+      show_rownames = TRUE,
+      show_colnames = FALSE,
+      color = colorRampPalette(c("blue", "white", "red"))(50),
+      main = "Hierarchical Clustering Heatmap",
+      annotation_row = data.frame(Cluster = factor(kmeans_result)),
+      annotation_colors = annotation_colors  # Apply dynamic colors
+    )
+  })
+  
+  # Render heatmap
+  output$heatmap = renderPlot({
+    reactive_heatmap()
+  })
+}
+
+# Run the application
+shinyApp(ui = ui, server = server)

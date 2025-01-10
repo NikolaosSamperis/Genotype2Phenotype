@@ -1,0 +1,230 @@
+library(shiny)
+library(DBI)
+library(RMySQL)
+library(ggplot2)
+library(plotly)
+library(dplyr)
+library(tidyr)
+library(umap)
+library(shinycssloaders)
+library(clusterProfiler)
+library(org.Mm.eg.db)
+
+# Define UI
+gene_clustering_ui <- fluidPage(
+  titlePanel(
+    HTML("<span style='font-family: Arial; font-size: 20px; font-weight: italic;'>Clustering of Gene Symbols on Significance Score (Mouse)</span>")
+  ),
+  
+  sidebarLayout(
+    sidebarPanel(
+      actionButton("update_plot", "Run UMAP Clustering"),
+      selectInput("cluster_select", "Select Cluster:", choices = NULL),
+      actionButton("run_enrichment", "Run Enrichment Analysis"),
+      width = 3
+    ),
+    
+    mainPanel(
+      withSpinner(plotlyOutput("cluster_plot", height = "600px")),
+      plotOutput("enrichment_plot"),
+      verbatimTextOutput("enrichment_table"),
+      verbatimTextOutput("click_info"),
+      width = 9
+    )
+  )
+)
+
+# Define Server
+gene_clustering_server <- function(input, output, session) {
+  # Establish a database connection
+  con <- dbConnect(
+    RMySQL::MySQL(),
+    dbname = "dcdm_project_final",
+    host = "localhost",
+    user = "barry",
+    password = "push12@KCL"
+  )
+  
+  onStop(function() {
+    dbDisconnect(con)  # Ensure connection is closed
+  })
+  
+  # Reactive data filtered from the database
+  filtered_data <- eventReactive(input$update_plot, {
+    query <- "SELECT UPPER(gene_symbol) as gene_symbol,
+              CONCAT(UCASE(SUBSTRING(parameter_name, 1, 1)), 
+              LOWER(SUBSTRING(parameter_name, 2))) AS parameter_name, 
+              pvalue,
+              CONCAT(UCASE(SUBSTRING(group_name, 1, 1)), 
+              LOWER(SUBSTRING(group_name, 2))) AS group_name 
+              FROM analysis"
+    dbGetQuery(con, query)
+  })
+  
+  # Reactive expression to prepare UMAP data
+  umap_data <- reactive({
+    data <- filtered_data()
+    
+    if (is.null(data) || nrow(data) == 0) {
+      return(NULL)
+    }
+    
+    # Filter for significant genes
+    data <- data %>%
+      filter(!is.na(pvalue))
+    
+    if (nrow(data) == 0) {
+      return(NULL)
+    }
+    
+    # Prepare phenotype data and group IDs
+    data <- data %>%
+      group_by(group_name) %>%
+      mutate(cluster = as.integer(factor(group_name))) %>%
+      ungroup()
+    
+    # Scale phenotype data for UMAP
+    umap_input <- data %>%
+      dplyr::select(pvalue) %>%  # Explicit namespace
+      scale()
+    
+    # Apply UMAP
+    set.seed(999)  # Ensure reproducibility
+    umap_result <- umap(umap_input, n_neighbors = 15, min_dist = 0.1, metric = "euclidean")
+    
+    # Add UMAP results to the data
+    data <- data %>%
+      mutate(
+        umap_x = umap_result$layout[, 1],
+        umap_y = umap_result$layout[, 2]
+      )
+    
+    return(data)
+  })
+  
+  # Update cluster options dynamically
+  observeEvent(input$update_plot, {
+    data <- umap_data()
+    if (!is.null(data)) {
+      updateSelectInput(session, "cluster_select", choices = unique(data$cluster))
+    }
+  })
+  
+  # Plotly output using UMAP data
+  output$cluster_plot <- renderPlotly({
+    data <- umap_data()
+    
+    if (is.null(data) || nrow(data) == 0) {
+      showNotification("No data available for clustering!", type = "error")
+      return(NULL)
+    }
+    
+    # Visualize significant genes with UMAP
+    plot <- ggplot(data, aes(
+      x = umap_x, y = umap_y, color = factor(cluster), text = paste(
+        "Gene Symbol:", gene_symbol,
+        "<br>Cluster:", cluster,
+        "<br>P-Value:", sprintf("%.5f", pvalue),
+        "<br>Group:", group_name
+      )
+    )) +
+      geom_point(size = 2, alpha = 0.8) +
+      scale_color_manual(values = scales::hue_pal()(length(unique(data$cluster)))) +
+      labs(
+        title = "",
+        x = "",
+        y = "",
+        color = "Clusters"
+      ) +
+      theme_minimal() +
+      theme(
+        plot.title = element_text(hjust = 0.5, size = 16),
+        legend.position = "right"
+      )
+    
+    ggplotly(plot, tooltip = "text")
+  })
+  
+  # Run enrichment analysis for the selected cluster
+  observeEvent(input$run_enrichment, {
+    cluster <- input$cluster_select
+    data <- umap_data()
+    
+    if (is.null(data) || nrow(data) == 0 || is.null(cluster)) {
+      showNotification("No data or cluster selected!", type = "error")
+      return()
+    }
+    
+    # Extract genes for the selected cluster
+    selected_genes <- data %>% filter(cluster == as.numeric(cluster)) %>% pull(gene_symbol)
+    
+    print(selected_genes)
+    
+    if (is.null(selected_genes) || length(selected_genes) == 0) {
+      showNotification("No genes found for the selected cluster!", type = "error")
+      return()
+    }
+    
+    # Map Gene Symbols to Entrez IDs
+    entrez_genes <- bitr(selected_genes, 
+                         fromType = "SYMBOL", 
+                         toType = "ENTREZID", 
+                         OrgDb = org.Mm.eg.db)
+    
+    if (is.null(entrez_genes) || nrow(entrez_genes) == 0) {
+      showNotification("No gene mappings found!", type = "error")
+      return()
+    }
+    
+    # Perform GO enrichment analysis
+    enrichment_result <- enrichGO(
+      gene = entrez_genes$ENTREZID,
+      OrgDb = org.Mm.eg.db,
+      ont = "BP",  # Biological processes
+      pAdjustMethod = "BH",
+      qvalueCutoff = 0.05
+    )
+    
+    output$enrichment_plot <- renderPlot({
+      if (is.null(enrichment_result)) return(NULL)
+      dotplot(enrichment_result)
+    })
+    
+    output$enrichment_table <- renderPrint({
+      if (is.null(enrichment_result)) return("No results found.")
+      as.data.frame(enrichment_result)
+    })
+  })
+  
+  
+  # Click information using UMAP data
+  output$click_info <- renderText({
+    click <- event_data("plotly_click")
+    
+    if (is.null(click)) {
+      return("Click on a point to see details.")
+    }
+    
+    data <- umap_data()
+    
+    if (is.null(data)) {
+      return("No data available.")
+    }
+    
+    clicked_point <- data %>%
+      mutate(
+        distance = sqrt((umap_x - click$x)^2 + (umap_y - click$y)^2)
+      ) %>%
+      filter(distance == min(distance))
+    
+    if (nrow(clicked_point) > 0) {
+      paste(
+        "Gene Symbol: ", clicked_point$gene_symbol[1],
+        "\nCluster: ", clicked_point$cluster[1],
+        "\nP-Value: ", sprintf("%.7f", clicked_point$pvalue[1])
+      )
+    } else {
+      "Click on a point to see details."
+    }
+  })
+}

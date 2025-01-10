@@ -1,0 +1,77 @@
+---
+title: "Data Reading"
+author: "Nikolaos Samperis"
+format: pdf
+---
+
+Loading libraries
+```{r}
+library(dplyr)
+library(parallel)
+library(tidyr)
+library(data.table)
+library(kableExtra)
+library(DBI)
+library(RMySQL)
+library(stringr)
+library(htmltools)
+```
+
+Merging and cleaning CSV files from raw experimental data
+```{r}
+# Define directory paths
+data_dir = "./data/9" 
+output_file = "../data/impc_data_R.csv"
+
+# Get a list of all CSV files in the directory
+csv_files = list.files(path = data_dir, pattern = "\\.csv$", full.names = TRUE)
+
+# Function to process a single file
+process_file = function(file) {
+ 
+   # Read the CSV file
+  data = fread(file, header = FALSE, col.names = c("key", "value"))
+  
+  # Clean and normalize the data by trimming white space and converting to lowercase
+  data = data %>%
+    mutate(
+      key = tolower(trimws(as.character(key))),
+      value = ifelse(!is.na(value) & trimws(value) != "", 
+                     tolower(trimws(as.character(value))), 
+                     NA)) # Missing or empty values replaced to NA
+  
+  # Group everything by key and mutate key names. Then ungroup for further processing. 
+  data = data %>%
+    group_by(key) %>%
+    mutate(key) %>% 
+    ungroup()
+  
+  # Pivot key-value pairs into wide format
+  row_data = data %>%
+    spread(key = key, value = value)
+  
+  return(row_data)
+}
+
+# Set up parallel processing
+cl = makeCluster(detectCores() - 1) # Use all but one core
+clusterExport(cl, varlist = c("fread", "trimws", "tolower", "process_file", "spread", "mutate", "replace", "bind_rows", "group_by", "row_number"))
+clusterEvalQ(cl, library(dplyr))
+clusterEvalQ(cl, library(data.table))
+clusterEvalQ(cl, library(tidyr))
+
+# Process files in parallel
+combined_data = parLapply(cl, csv_files, process_file)
+stopCluster(cl)
+
+# Combine all rows into one data frame
+combined_data = bind_rows(combined_data)
+
+# Convert pvalue column to numeric
+combined_data$pvalue = as.numeric(combined_data$pvalue)
+
+# Replace pvalues above 1 with NA(missing value).
+clean_data = combined_data %>%
+  mutate(pvalue = ifelse(pvalue > 1, NA, pvalue))
+```
+

@@ -1,0 +1,24 @@
+"0","library(DBI)"
+"0","library(RMySQL)"
+"2","
+Attaching package: ‘RMySQL’
+
+"
+"2","The following object is masked from ‘package:RSQLite’:
+
+    isIdCurrent
+
+"
+"0","library(readr)"
+"2","
+Attaching package: ‘readr’
+
+"
+"2","The following object is masked from ‘package:scales’:
+
+    col_factor
+
+"
+"0","library(dplyr)"
+"0","library(ggplot2)"
+"0","library(stringr) "
