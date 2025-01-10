@@ -57,6 +57,21 @@ Ensure you have the following installed:
    shiny::runApp()
    ```
 
+### **Data Preparation**
+If interested in running data cleaning/collation and database creation, do the following:
+1. Run the data reading and collation script:
+   ```r
+   rmarkdown::render("scripts/data_reading.qmd")
+   ```
+   Jupyter Notebook (Python alternative):
+   ```sh
+   jupyter notebook scripts/data_cleaning.ipynb
+   ```
+2. Manage the database:
+   ```r
+   rmarkdown::render("scripts/dbms.Rmd")
+   ```
+
 ## Collaborators & Contributions
 This project is developed as part of a group coursework for the data cleaning and data management module. Thanks to my group members for their help on this project.
 - Nikolaos Samperis
