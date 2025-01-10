@@ -24,7 +24,7 @@ Genotype2Phenotype
 │── scripts       # R scripts for data cleaning & visualization
 │── database      # SQL scripts for database setup
 │── dashboard     # RShiny app for data exploration
-│── README.md       # Project Documentation
+│── README.md     # Project Documentation
 ```
 
 ## Visualizations
@@ -47,7 +47,7 @@ Ensure you have the following installed:
    ```
 2. Import the database schema:
    ```sh
-   mysql -u root -p < database/dcdm_project_final.sql
+   mysql -u root -p < database/dcdm_project_group9.sql
    ```
 
 ### **Running the RShiny Dashboard**
@@ -57,10 +57,19 @@ Ensure you have the following installed:
    shiny::runApp()
    ```
 
-## License
-This project is for educational purposes as part of coursework. Feel free to use and modify the code with proper attribution.
-
 ## Collaborators & Contributions
-This project is developed as part of a group coursework for the data cleaning and data management module. Contributions include database design, R programming, statistical analysis, and dashboard development.
+This project is developed as part of a group coursework for the data cleaning and data management module. Thanks to my group members for their help on this project.
+- Nikolaos Samperis
+- Aidan Saldanha 
+- Harit Kohli
+
+Contributions include database design, R programming, statistical analysis, and dashboard development.
+
+## License
+This project was created for educational purposes as part of coursework.
+
+Feel free to use, modify, and share the code **with proper attribution**. Please note that this project is provided **as-is**, without any warranty or guarantee of functionality.
+
+If you use this code, kindly credit the original author by linking back to this repository.
 
 **Understanding the Role of Every Mouse Gene – One Knockout at a Time!** 
