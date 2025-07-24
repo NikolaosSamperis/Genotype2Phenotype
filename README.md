@@ -75,6 +75,7 @@ If interested in running data cleaning/collation and database creation, do the f
 ## Collaborators & Contributions
 This project is developed as part of a group coursework for the data cleaning and data management module. Thanks to my group members for their help on this project.
 - Nikolaos Samperis
+- Bhargav Pulugundla
 - Aidan Saldanha 
 - Harit Kohli
 
