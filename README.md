@@ -1,3 +1,11 @@
+[![R‑Shiny](https://img.shields.io/badge/R–Shiny-%23ED5986?logo=R)](https://shiny.rstudio.com/)
+[![MySQL](https://img.shields.io/badge/MySQL-4479A1?logo=mysql&logoColor=white)](https://www.mysql.com/)
+[![RMySQL](https://img.shields.io/badge/RMySQL-%23007A99)](https://cran.r-project.org/package=RMySQL)
+[![DBI](https://img.shields.io/badge/DBI-%23DB4C3F)](https://cran.r-project.org/package=DBI)
+[![dplyr](https://img.shields.io/badge/dplyr-%232C496E?logo=r&logoColor=white)](https://cran.r-project.org/package=dplyr)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+
 # Genotype2Phenotype
 **Genotype2Phenotype** is a data-driven project aimed at exploring the impact of gene knockouts on mouse phenotypes using statistical analysis, database management, and interactive visualizations.
 
