@@ -42,7 +42,7 @@ Ensure you have the following installed:
 ### **Database Setup**
 1. Clone this repository:
    ```sh
-   git clone https://github.com/bpulugundla/Genotype2Phenotype.git
+   git clone https://github.com/NikolaosSamperis/Genotype2Phenotype.git
    cd Genotype2Phenotype
    ```
 2. Import the database schema:
